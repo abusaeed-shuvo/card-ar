@@ -1,25 +1,25 @@
 <!DOCTYPE html>
-<html lang="en" dir="ltr">
+<html lang="en">
 	<head>
-		<meta charset="utf-8" />
-		<meta name="viewport" content="width=device-width,initial-scale=1" />
-		<title>AR Cube — Camera Preview</title>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>AR Cube — Camera Overlay</title>
 		<style>
 			html,
 			body {
-				height: 100%;
 				margin: 0;
-				font-family: system-ui, -apple-system, Segoe UI, Roboto,
-					"Helvetica Neue", Arial;
+				height: 100%;
 				background: #111;
 				color: #eee;
+				font-family: system-ui, -apple-system, Segoe UI, Roboto,
+					"Helvetica Neue", Arial;
 			}
 			.container {
 				display: flex;
 				flex-direction: column;
 				height: 100%;
-				gap: 8px;
 				padding: 12px;
+				gap: 8px;
 				box-sizing: border-box;
 			}
 			header {
@@ -32,11 +32,7 @@
 				font-size: 16px;
 				margin: 0;
 			}
-			.controls {
-				display: flex;
-				gap: 8px;
-			}
-			button {
+			.controls button {
 				padding: 8px 12px;
 				font-size: 14px;
 				border-radius: 6px;
@@ -45,52 +41,16 @@
 				color: white;
 				cursor: pointer;
 			}
-			button[disabled] {
+			.controls button[disabled] {
 				opacity: 0.45;
 				cursor: not-allowed;
-			}
-			main {
-				display: flex;
-				gap: 12px;
-				flex: 1;
-				align-items: stretch;
-			}
-			.preview {
-				width: 40%;
-				min-width: 220px;
-				background: #000;
-				border-radius: 8px;
-				overflow: hidden;
-				position: relative;
-				display: flex;
-				flex-direction: column;
-			}
-			video#camPreview {
-				width: 100%;
-				height: 100%;
-				object-fit: cover;
-				background: #000;
-			}
-			.hint {
-				position: absolute;
-				bottom: 8px;
-				left: 8px;
-				right: 8px;
-				color: #fff;
-				background: rgba(0, 0, 0, 0.35);
-				padding: 6px 8px;
-				border-radius: 6px;
-				font-size: 13px;
 			}
 			.arStage {
 				flex: 1;
 				position: relative;
 				border-radius: 8px;
 				overflow: hidden;
-				background: linear-gradient(180deg, #111, #000);
-				display: flex;
-				align-items: center;
-				justify-content: center;
+				background: #000;
 			}
 			canvas {
 				width: 100%;
@@ -100,51 +60,27 @@
 			.status {
 				font-size: 13px;
 				opacity: 0.9;
-			}
-			footer {
-				font-size: 12px;
-				opacity: 0.7;
-				text-align: center;
-				padding-top: 6px;
+				position: absolute;
+				bottom: 8px;
+				left: 8px;
+				background: rgba(0, 0, 0, 0.35);
+				padding: 6px 8px;
+				border-radius: 6px;
 			}
 		</style>
 	</head>
 	<body>
 		<div class="container">
 			<header>
-				<h1>AR Cube Display</h1>
+				<h1>AR Cube Overlay</h1>
 				<div class="controls">
 					<button id="startCam">Start Camera</button>
-					<button id="enterAR" disabled>Enter AR</button>
 				</div>
 			</header>
 
-			<main>
-				<section class="preview" aria-label="Camera Preview">
-					<video id="camPreview" autoplay muted playsinline></video>
-					<div class="hint">Preview feed — before entering AR</div>
-				</section>
-
-				<section class="arStage" aria-label="AR Stage">
-					<!-- three.js will attach a canvas here -->
-					<div
-						id="rendererContainer"
-						style="position: absolute; inset: 0"
-					></div>
-					<div
-						style="
-							position: relative;
-							z-index: 2;
-							pointer-events: none;
-							text-align: center;
-						"
-					>
-						<div class="status" id="status">
-							Ready — start the camera then click "Enter AR" (if supported)
-						</div>
-					</div>
-				</section>
-			</main>
+			<div class="arStage" id="arStage">
+				<div class="status" id="status">Click "Start Camera" to begin.</div>
+			</div>
 
 			<footer>GitHub Copilot</footer>
 		</div>
@@ -152,162 +88,89 @@
 		<script src="https://unpkg.com/three@0.152.2/build/three.min.js"></script>
 		<script>
 			const startCamBtn = document.getElementById("startCam");
-			const enterARBtn = document.getElementById("enterAR");
-			const camPreview = document.getElementById("camPreview");
 			const statusEl = document.getElementById("status");
-			const rendererContainer = document.getElementById("rendererContainer");
+			const arStage = document.getElementById("arStage");
 
-			const scene = new THREE.Scene();
-			const camera = new THREE.PerspectiveCamera(60, 2, 0.01, 20);
-			const renderer = new THREE.WebGLRenderer({
-				antialias: true,
-				alpha: true,
-			});
-			renderer.setPixelRatio(window.devicePixelRatio);
-			rendererContainer.appendChild(renderer.domElement);
-			renderer.domElement.style.width = "100%";
-			renderer.domElement.style.height = "100%";
-			renderer.xr.enabled = true;
+			let scene, camera, renderer, cube, video, videoTexture;
 
-			const light = new THREE.HemisphereLight(0xffffff, 0x444444, 1.2);
-			scene.add(light);
-			const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
-			dirLight.position.set(0.5, 1, 0.5);
-			scene.add(dirLight);
-
-			const geometry = new THREE.BoxGeometry(0.2, 0.2, 0.2);
-			const material = new THREE.MeshStandardMaterial({
-				color: 0x00ccff,
-				roughness: 0.4,
-				metalness: 0.1,
-			});
-			const cube = new THREE.Mesh(geometry, material);
-			cube.castShadow = true;
-			scene.add(cube);
-
-			const grid = new THREE.Mesh(
-				new THREE.PlaneGeometry(2, 2),
-				new THREE.MeshBasicMaterial({
-					color: 0x000000,
-					opacity: 0,
-					transparent: true,
-				})
-			);
-			grid.rotation.x = -Math.PI / 2;
-			scene.add(grid);
-
-			let xrSession = null;
-			let running = false;
-			const clock = new THREE.Clock();
-
-			function onResize() {
-				const w = rendererContainer.clientWidth;
-				const h = rendererContainer.clientHeight;
-				renderer.setSize(w, h);
-				camera.aspect = w / h;
-				camera.updateProjectionMatrix();
-			}
-			window.addEventListener("resize", onResize);
-			onResize();
-
-			async function startCameraPreview() {
+			async function initCameraOverlay() {
 				try {
 					const stream = await navigator.mediaDevices.getUserMedia({
 						video: { facingMode: "environment" },
 						audio: false,
 					});
-					camPreview.srcObject = stream;
-					await camPreview.play();
-					startCamBtn.disabled = true;
-					statusEl.textContent =
-						"Camera is running — you can now enter AR if supported.";
-					if (navigator.xr && navigator.xr.isSessionSupported) {
-						const supported = await navigator.xr.isSessionSupported(
-							"immersive-ar"
-						);
-						if (supported) {
-							enterARBtn.disabled = false;
-							statusEl.textContent =
-								'Ready: click "Enter AR" to display the cube in AR';
-						} else {
-							statusEl.textContent =
-								"Your device does not support WebXR AR. Only the camera preview will work.";
-						}
-					} else {
-						statusEl.textContent =
-							"WebXR is not available in this browser. Only the normal preview will work.";
+					video = document.createElement("video");
+					video.srcObject = stream;
+					video.autoplay = true;
+					video.muted = true;
+					video.playsInline = true;
+					await video.play();
+
+					// Setup Three.js
+					scene = new THREE.Scene();
+					camera = new THREE.PerspectiveCamera(
+						60,
+						arStage.clientWidth / arStage.clientHeight,
+						0.01,
+						100
+					);
+					renderer = new THREE.WebGLRenderer({ antialias: true });
+					renderer.setPixelRatio(window.devicePixelRatio);
+					renderer.setSize(arStage.clientWidth, arStage.clientHeight);
+					arStage.appendChild(renderer.domElement);
+
+					// Use camera feed as background texture
+					videoTexture = new THREE.VideoTexture(video);
+					videoTexture.minFilter = THREE.LinearFilter;
+					videoTexture.magFilter = THREE.LinearFilter;
+					videoTexture.format = THREE.RGBFormat;
+					scene.background = videoTexture;
+
+					// Add lights
+					const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 1.2);
+					scene.add(hemiLight);
+					const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
+					dirLight.position.set(0.5, 1, 0.5);
+					scene.add(dirLight);
+
+					// Cube
+					const geometry = new THREE.BoxGeometry(0.2, 0.2, 0.2);
+					const material = new THREE.MeshStandardMaterial({
+						color: 0x00ccff,
+						roughness: 0.4,
+						metalness: 0.1,
+					});
+					cube = new THREE.Mesh(geometry, material);
+					cube.position.set(0, 0, -1); // 1 meter in front of camera
+					scene.add(cube);
+
+					// Animate
+					const clock = new THREE.Clock();
+					function animate() {
+						requestAnimationFrame(animate);
+						const dt = clock.getDelta();
+						cube.rotation.x += dt * 0.7;
+						cube.rotation.y += dt * 0.5;
+						renderer.render(scene, camera);
 					}
+					animate();
+
+					window.addEventListener("resize", () => {
+						camera.aspect = arStage.clientWidth / arStage.clientHeight;
+						camera.updateProjectionMatrix();
+						renderer.setSize(arStage.clientWidth, arStage.clientHeight);
+					});
+
+					startCamBtn.disabled = true;
+					statusEl.textContent = "Camera started — cube overlay is active.";
 				} catch (err) {
 					console.error(err);
 					statusEl.textContent =
-						"Failed to start camera: " + (err.message || err.name);
+						"Failed to access camera: " + (err.message || err.name);
 				}
 			}
 
-			startCamBtn.addEventListener("click", startCameraPreview);
-
-			enterARBtn.addEventListener("click", async () => {
-				if (!navigator.xr) {
-					statusEl.textContent = "WebXR is not available.";
-					return;
-				}
-				try {
-					xrSession = await navigator.xr.requestSession("immersive-ar", {
-						requiredFeatures: ["local"],
-						optionalFeatures: ["dom-overlay", "light-estimation"],
-						domOverlay: { root: document.body },
-					});
-					renderer.xr.setSession(xrSession);
-					running = true;
-					enterARBtn.disabled = true;
-					startCamBtn.disabled = true;
-					statusEl.textContent =
-						"In AR session — move your device to view the cube.";
-					renderer.setAnimationLoop(render);
-					xrSession.addEventListener("end", onXRSessionEnded);
-				} catch (err) {
-					console.error("Failed to start AR session", err);
-					statusEl.textContent =
-						"Failed to start AR session: " + (err.message || err.name);
-				}
-			});
-
-			function onXRSessionEnded() {
-				xrSession = null;
-				running = false;
-				renderer.setAnimationLoop(null);
-				statusEl.textContent = "AR session ended.";
-				enterARBtn.disabled = false;
-				startCamBtn.disabled = true;
-			}
-
-			const tempVec = new THREE.Vector3();
-			function render(timestamp, frame) {
-				const dt = clock.getDelta();
-				cube.rotation.x += dt * 0.7;
-				cube.rotation.y += dt * 0.5;
-
-				if (xrSession && frame) {
-					const xrCamera = renderer.xr.getCamera(camera);
-					xrCamera.getWorldDirection(tempVec);
-					cube.position
-						.copy(xrCamera.position)
-						.add(tempVec.multiplyScalar(1.5));
-					cube.rotation.y += dt * 0.7;
-				} else {
-					cube.position.set(0, 0, -1.2);
-				}
-
-				renderer.render(scene, camera);
-			}
-
-			running = true;
-			renderer.setAnimationLoop(render);
-
-			if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-				startCamBtn.disabled = true;
-				statusEl.textContent = "getUserMedia is not available in this browser.";
-			}
+			startCamBtn.addEventListener("click", initCameraOverlay);
 		</script>
 	</body>
 </html>
